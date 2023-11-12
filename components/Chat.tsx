@@ -51,6 +51,10 @@ export function Chat() {
   const [cookie, setCookie] = useCookies([COOKIE_NAME])
 
   useEffect(() => {
+    window.scrollTo(0,document.body.scrollHeight)
+  }, [messages])
+
+  useEffect(() => {
     if (!cookie[COOKIE_NAME]) {
       // generate a semi random short id
       const randomId = Math.random().toString(36).substring(7)
