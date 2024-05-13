@@ -36,7 +36,7 @@ Routing decision - I will continue to help the user
   messages.push(...body?.messages)
 
   const payload: OpenAIStreamPayload = {
-    model: 'gpt-4o',
+    model: 'gpt-4',
     messages: messages,
     temperature: 0.4,
     max_tokens: 300,
