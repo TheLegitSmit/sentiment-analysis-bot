@@ -1,13 +1,37 @@
 import { type ChatGPTMessage } from '../../components/ChatLine'
 import { OpenAIStream, OpenAIStreamPayload } from '../../utils/OpenAIStream'
+import { GraphQLClient, gql } from 'graphql-request'
 
-// break the app if the API key is missing
-if (!process.env.OPENAI_API_KEY) {
-  throw new Error('Missing Environment Variable OPENAI_API_KEY')
+// Ensure the necessary environment variables are set
+if (!process.env.OPENAI_API_KEY || !process.env.HYGRAPH_ENDPOINT || !process.env.HYGRAPH_TOKEN) {
+  throw new Error('Missing Environment Variable')
 }
 
 export const config = {
   runtime: 'edge',
+}
+
+const hygraphClient = new GraphQLClient(process.env.HYGRAPH_ENDPOINT, {
+  headers: {
+    authorization: `Bearer ${process.env.HYGRAPH_TOKEN}`,
+  },
+})
+
+const saveConversationToHygraph = async (messages: ChatGPTMessage[]) => {
+  const saveConversationMutation = gql`
+    mutation($messages: Json!, $timestamp: DateTime!) {
+      createSentimentTranscript(data: { messages: $messages, timestamp: $timestamp }) {
+        id
+      }
+    }
+  `
+
+  const timestamp = new Date().toISOString()
+
+  await hygraphClient.request(saveConversationMutation, {
+    messages: JSON.stringify(messages), // Ensure messages are sent as a JSON string
+    timestamp: timestamp,
+  })
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -36,7 +60,7 @@ Routing decision - I will continue to help the user
   messages.push(...body?.messages)
 
   const payload: OpenAIStreamPayload = {
-    model: 'gpt-4o',
+    model: 'gpt-4',
     messages: messages,
     temperature: 0.4,
     max_tokens: 300,
@@ -49,6 +73,26 @@ Routing decision - I will continue to help the user
   }
 
   const stream = await OpenAIStream(payload)
-  return new Response(stream)
+
+  // Capture the assistant's response from the stream and add it to the messages array
+  const decoder = new TextDecoder()
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let assistantMessage = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    assistantMessage += decoder.decode(value, { stream: true })
+  }
+
+  messages.push({ role: 'assistant', content: assistantMessage })
+
+  // Save the conversation to Hygraph after processing the full response
+  await saveConversationToHygraph(messages)
+
+  return new Response(new Blob(chunks))
 }
+
 export default handler
